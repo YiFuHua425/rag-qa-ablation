@@ -1,0 +1,20 @@
+# 统一行尾：仓库内存 LF，Windows 检出也保持 LF，避免多人协作时整文件 diff
+* text=auto eol=lf
+
+# 二进制：不要做任何行尾转换与文本 diff
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.pdf  binary
+*.pptx binary
+*.docx binary
+*.xlsx binary
+*.npy  binary
+*.bin  binary
+*.safetensors binary
+
+# 语言统计
+*.py   text
+*.md   text
+*.yaml text
+*.json text
