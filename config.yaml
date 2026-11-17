@@ -1,0 +1,70 @@
+# 全组统一配置：所有超参走这里，禁止硬编码
+# 真实实验需要 pyyaml；--dry-run 不读本文件
+
+project:
+  name: rag-qa-ablation
+  topic_id: 26
+  seed: 42
+
+data:
+  corpus: data/corpus.jsonl
+  dev: data/dev.jsonl
+  smoke_size: 500          # 快速迭代子集
+  max_chars: 2000          # 上下文拼装上限（字符）
+
+retrieval:
+  dense:
+    model: BAAI/bge-small-zh-v1.5
+    query_prefix: ""        # bge-base 可填 "为这个句子生成表示以用于检索相关文章："
+    normalize: true         # 必须 L2 归一化
+    index: IndexFlatIP
+    topk: 5
+    encode_batch: 64
+  sparse:
+    enabled: true
+    k1: 1.5
+    b: 0.75
+    tokenizer: jieba
+    topk: 100              # 稀疏路召回深度
+  fusion:
+    method: rrf
+    k: 60                  # RRF 平滑常数
+    alpha: 0.5             # 稠密路权重；E2 扫描 {0,.2,.4,.5,.6,.8,1.0}
+    dense_depth: 100
+
+rerank:
+  enabled: false
+  model: BAAI/bge-reranker-base
+  depth: 50                # 只对前 depth 个候选重排；E4 扫描 {20,50,100}
+  topn: 5
+  device: cuda
+  max_length: 512
+
+reader:
+  model: uer/roberta-base-chinese-extractive-qa
+  max_length: 512
+  device: cuda
+  batch_size: 16
+  null_score: -100.0
+
+context:
+  order: natural           # natural | gold_first | gold_middle | gold_last（E5 用）
+  max_chars: 2000
+
+eval:
+  splits: [smoke, full]
+  topk: 5
+  bootstrap_n: 1000
+  alpha: 0.05
+
+latency:
+  # 延迟统一口径：CPU 单线程、batch=1、重复 3 次取中位数
+  device: cpu
+  threads: 1
+  repeat: 3
+
+paths:
+  results_raw: results/raw
+  results_fig: results/fig
+  results_tab: results/tab
+  results_log: results/log

@@ -1,0 +1,29 @@
+# 第 0 棒只需标准库即可跑 `python eval/run_e1.py --dry-run`
+# 下面这些是真实实验用的（B / C 需要；A / D / E 不装也能干活）
+
+# --- 基础 ---
+numpy>=1.24
+tqdm>=4.66
+pyyaml>=6.0
+
+# --- 检索（B）---
+# 有 NVIDIA GPU 用这个（CUDA 12.1）；纯 CPU 把 torch 换成 cpu 版即可
+torch>=2.1
+transformers>=4.40
+sentence-transformers>=2.7
+faiss-cpu>=1.8            # 若显存/规模需要可换 faiss-gpu
+jieba>=0.42.1
+
+# --- 重排与读者（C）---
+# transformers 已含；reranker / extractive QA 都走 transformers
+# 若要用生成式 LLM 做定性演示（仅 demo，不作主结论）：
+# ollama                 # 或用 llama.cpp 的 server，自己起
+
+# --- 图表（D）---
+matplotlib>=3.8
+pandas>=2.2
+
+# --- 说明 ---
+# 1) 不许在脚本里 import 未登记于此的第三方库
+# 2) 版本以本文件为准，报告第 4 章的环境表直接抄这里
+# 3) Windows 下 faiss-cpu 用 pip 直装即可，勿用 conda 混装

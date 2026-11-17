@@ -1,0 +1,48 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# ---- 数据（体积大，不入库；各自本地放）----
+data/*.jsonl
+data/*.json
+data/raw/
+data/CMRC2018/
+data/squad/
+
+# ---- 实验结果 ----
+# 原始 json 是跑出来的，一条命令即可复现，不入库；
+# 冻结的是 results/fig 的图与 results/tab 的表（进报告和 PPT 的那些）
+results/raw/*.json
+results/log/*.log
+!results/raw/.gitkeep
+!results/fig/.gitkeep
+!results/tab/.gitkeep
+!results/log/.gitkeep
+
+# ---- 交付物二进制（用网盘/DAM 传，仓库只放源）----
+ppt/*.pptx
+report/*.docx
+report/*.pdf
+*.mp4
+*.mov
+
+# ---- 任务书原件（老师发的，不入库）----
+专题汇报要求.pptx
+
+# ---- 系统与编辑器 ----
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# ---- 模型缓存 ----
+.cache/
+*.bin
+*.safetensors
+*.gguf
