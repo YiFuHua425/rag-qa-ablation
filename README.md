@@ -11,8 +11,8 @@
 ## 快速开始
 
 ```bash
-git clone <REPO_URL>
-cd <repo>
+git clone https://github.com/YiFuHua425/rag-qa-ablation.git
+cd rag-qa-ablation
 
 # 1) 验证骨架（零依赖，只用标准库，不需要装 torch / faiss）
 python eval/run_e1.py --dry-run
