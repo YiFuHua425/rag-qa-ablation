@@ -43,9 +43,11 @@ pip install -r requirements.txt
 ├── config.yaml             所有超参，禁止硬编码
 ├── requirements.txt
 ├── data/                   语料与问题（jsonl 不进 git，见 .gitignore）
+│   ├── build_data.py       CMRC2018 → corpus/dev（D，可复现）
 │   ├── corpus.jsonl        {"doc_id","text"}                   ← D 产出
-│   └── dev.jsonl           {"qid","question","gold_doc_id",
-│                            "answer_text","answer_start"}      ← D 产出
+│   ├── dev.jsonl           {"qid","question","gold_doc_id",
+│   │                        "answer_text","answer_start"}      ← D 产出
+│   └── dev_smoke.jsonl     500 题子集（seed=42）                 ← D 产出
 ├── retrieval/
 │   ├── bm25.py             BM25 打分（B 手写）
 │   ├── bge_encoder.py      BGE 编码 + FAISS 索引（B）
@@ -107,9 +109,10 @@ pip install -r requirements.txt
 
 ## 当前进度
 
-- [x] **第 0 棒**：接口冻结 + 空实现 + `--dry-run` 可跑 ← 现在在这里
-- [ ] 第 1 棒（D）：数据就绪，`check_data.py --strict` 全绿
-- [ ] 第 2 棒（A+B+C）：打通一条直线，出第一个 `Recall@5`
+- [x] **第 0 棒**：接口冻结 + 空实现 + `--dry-run` 可跑
+- [x] **第 1 棒（D）**：数据就绪，`check_data.py --strict` 全绿
+  （3507 段 / 3219 题 / smoke 500 题 / 答案越界 0；见 `data/README.md`）
+- [ ] 第 2 棒（A+B+C）：打通一条直线，出第一个 `Recall@5` ← 现在在这里
 - [ ] 第 3 棒（B/C）：三件套可开关（6 种配置）
 - [ ] 第 4 棒（全员）：E1–E4 矩阵 + 主结果总表
 - [ ] 第 5 棒（C）：E5 位置偏差

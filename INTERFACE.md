@@ -185,3 +185,4 @@ def bootstrap_ci(values: list[float], n: int = 1000, alpha: float = 0.05,
 | 日期 | 谁 | 改了什么 | 影响 |
 |---|---|---|---|
 | 11-17 | A | 冻结初版接口 | 全员 |
+| 11-21 | D | 新增 `data/build_data.py`；`dev.jsonl` 每条附加只读字段 `source_id`（CMRC 原始 `DEV_x_QUERY_y`，便于溯源，下游可忽略）；`qid` 统一为 `dev_0001` 形式 | 无破坏性：必需字段与类型不变 |
