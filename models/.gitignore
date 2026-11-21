@@ -1,0 +1,6 @@
+# 模型权重不入库（int8 22.8MB / fp32 94.9MB，GitHub 单文件上限 100MB 且克隆会变慢）
+# 需要时一键下载（hf-mirror，见 scripts/download_model.py）：
+#   python scripts/download_model.py                 # int8
+#   python scripts/download_model.py --fp32          # fp32（4 连接分段续传）
+*.onnx
+*.onnx.part*

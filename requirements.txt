@@ -14,6 +14,14 @@ sentence-transformers>=2.7
 faiss-cpu>=1.8            # 若显存/规模需要可换 faiss-gpu
 jieba>=0.42.1
 
+# --- 检索（B）无 torch 的备选后端（Windows 上 torch 装不上时用这条线）---
+# BgeEncoder 会按 backend="auto" 自动选：onnx -> st -> hash
+# 权重：Xenova/bge-small-zh-v1.5 的 onnx/model_int8.onnx + tokenizer.json 放到
+#       models/bge-small-zh-v1.5-onnx/（见 scripts/download_model.py）
+# 注：数据由第 1 棒 D 的 data/build_data.py（纯标准库）产出，不需要 pyarrow
+onnxruntime>=1.16
+pytest>=7.4               # tests/test_retrieval.py
+
 # --- 重排与读者（C）---
 # transformers 已含；reranker / extractive QA 都走 transformers
 # 若要用生成式 LLM 做定性演示（仅 demo，不作主结论）：

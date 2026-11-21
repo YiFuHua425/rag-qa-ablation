@@ -119,30 +119,131 @@ def run_dry(n_questions: int = 30, topk: int = 5, seed: int = 42,
 
 # ------------------------------------------------------------------ 真实运行
 
-def run_real(split: str, topk: int) -> dict:
-    """TODO(A)：第 2 棒打通。
-    docs  = load_jsonl(data/corpus.jsonl)
-    dev   = load_jsonl(data/dev.jsonl)  (smoke 用 data/dev_smoke.jsonl)
-    enc   = BgeEncoder(...); idx = FaissIndex(...)
-    for q in dev:
-        ranked = idx.search(enc.encode_query(q["question"]), topk*20)
-        ctx, used = build_context(...)
-        pred, score = reader.answer(q["question"], ctx)
+def run_real(split: str, topk: int, seed: int = 42, backend: str = "auto",
+             model_path: str | None = None, limit: int = 0, use_reader: bool = True) -> dict:
+    """第 2 棒：把 B 的检索接进 A 的入口，跑出 E1 基线。
+
+    C 的 ``ExtractiveReader`` 还是 STUB 时自动降级：Recall/MRR/nDCG 照常出数，
+    F1/EM 记 null 并在 meta 里写明原因——**检索那半边不阻塞任何人**。
     """
-    corpus = ROOT / "data" / "corpus.jsonl"
-    dev = ROOT / "data" / ("dev_smoke.jsonl" if split == "smoke" else "dev.jsonl")
-    missing = [str(p) for p in (corpus, dev) if not p.exists()]
-    if missing:
-        print("[X] 缺少数据文件：" + ", ".join(missing), file=sys.stderr)
-        print("    → 这是第 1 棒（D）的交付物；先跑 "
-              "`python eval/check_data.py` 看具体要求。", file=sys.stderr)
-        print("    → 或者先用 `--dry-run` 验证骨架。", file=sys.stderr)
-        raise SystemExit(2)
-    raise SystemExit(
-        "[!] 数据齐了，但真实 pipeline 尚未接线（第 2 棒的活）。\n"
-        "    A：在 eval/run_e1.py::run_real() 里接 B 的 BgeEncoder/FaissIndex、\n"
-        "       C 的 build_context/ExtractiveReader、D 的 metrics。"
+    import statistics
+    from eval import io_utils as IU
+    from eval.retrieval_eval import metrics_dict, per_question_records, recall_ci
+    from retrieval import BgeEncoder, FaissIndex
+
+    cfg = IU.load_config()
+    docs, queries = IU.load_split(split, cfg)
+    if limit:
+        queries = queries[: int(limit)]
+    dense = cfg.get("retrieval", {}).get("dense", {})
+    print(f"[E1] split={split}  docs={len(docs)}  queries={len(queries)}  开始编码/建索引 …")
+
+    enc = BgeEncoder(
+        model_name=dense.get("model", "BAAI/bge-small-zh-v1.5"),
+        query_prefix=dense.get("query_prefix", ""),
+        batch_size=int(dense.get("encode_batch", 64)),
+        model_path=model_path,
+        backend=backend,
     )
+    # 第 2 棒原文要求「BGE 编码全库 + FAISS 建索引」：faiss 装了就用它（IndexFlatIP），
+    # 没装则自动退 numpy 内积。两者 top-100 集合 100% 一致、指标逐位一致（见 results/tab/E2_backend.csv）。
+    index = FaissIndex(use_faiss=True)
+    index.build_from_encoder(enc, docs, tag="docs")
+    print(f"[E1] 索引就绪：{len(index.doc_ids)} 篇 × {index.dim} 维（backend={index.backend}）")
+
+    fusion = cfg.get("retrieval", {}).get("fusion", {})
+    depth = max(int(topk), int(fusion.get("dense_depth", 100)))
+    q_texts = [q["question"] for q in queries]
+    q_emb = enc.encode_queries(q_texts, show_progress=True)
+    rankings = index.search_ids_batch(q_emb, depth)
+    golds = [q["gold_doc_id"] for q in queries]
+
+    metrics = metrics_dict(rankings, golds, ks=(1, 5, 10, 20), ndcg_k=topk)
+    ci = recall_ci(rankings, golds, k=topk,
+                   n_boot=int(cfg.get("eval", {}).get("bootstrap_n", 1000)),
+                   alpha=float(cfg.get("eval", {}).get("alpha", 0.05)))
+
+    # 延迟：30 题 × 3 轮取中位数，含查询编码 + 检索
+    probe = min(30, len(queries))
+    times: list[float] = []
+    for _ in range(3):
+        for i in range(probe):
+            t0 = time.perf_counter()
+            v = enc.encode_queries([q_texts[i]])
+            index.search(v[0], topk)
+            times.append((time.perf_counter() - t0) * 1000.0)
+    latency = statistics.median(times)
+
+    # ---- 阅读器（C 的模块）：STUB 时降级，不让 F1 卡住检索数字
+    preds: list[str] = []
+    reader_state = "stub"
+    try:
+        from reader import extractive_qa as _rq
+
+        if use_reader and not getattr(_rq, "STUB", True):
+            from reader.context_builder import build_context
+
+            doc_map = {d["doc_id"]: d for d in docs}
+            reader = _rq.ExtractiveReader()
+            ctx_cfg = cfg.get("context", {})
+            for q, ranked in zip(queries, rankings):
+                ctx, _used = build_context(
+                    ranked[:topk], doc_map,
+                    order=ctx_cfg.get("order", "natural"),
+                    max_chars=int(ctx_cfg.get("max_chars", 2000)),
+                    gold_doc_id=None,
+                )
+                pred, _score = reader.answer(q["question"], ctx)
+                preds.append(pred)
+            reader_state = "ok"
+    except (ImportError, NotImplementedError, TypeError, AttributeError) as exc:
+        reader_state = f"skipped: {type(exc).__name__}"
+
+    if reader_state == "ok" and len(preds) == len(queries):
+        metrics["em"] = mean([em(p, q["answer_text"]) for p, q in zip(preds, queries)])
+        metrics["f1"] = mean([f1(p, q["answer_text"]) for p, q in zip(preds, queries)])
+    else:
+        metrics["em"] = None
+        metrics["f1"] = None
+
+    metrics["latency_ms"] = round(latency, 3)
+    metrics[f"recall@{topk}_ci"] = ci
+
+    rows = per_question_records([q["qid"] for q in queries], rankings, golds, top_show=depth)
+    for i, row in enumerate(rows):
+        row["pred"] = preds[i] if i < len(preds) else ""
+        row["f1"] = None if not preds else f1(preds[i], queries[i]["answer_text"])
+
+    run_id = f"E1_dense_top{topk}"
+    out = IU.write_run(
+        run_id,
+        config={"retriever": "dense", "topk": topk, "depth": depth,
+                "rerank": False, "reader": reader_state,
+                "model": enc.model_name,
+                "model_file": Path(str(enc.model_file)).name,
+                "index_backend": index.backend},
+        metrics=metrics,
+        per_question=rows,
+        meta={"split": split, "n_questions": len(queries), "n_docs": len(docs),
+              "seed": seed, "reader": reader_state,
+              "note": "int8 权重" if model_path and "int8" in str(model_path) else "auto 选中的权重"},
+        cfg=cfg,
+    )
+
+    f1_txt = f"{metrics['f1']:.3f}" if metrics["f1"] is not None else "待 C（reader STUB）"
+    print("-" * 62)
+    print(f"Recall@1        {metrics['recall@1']:.3f}")
+    print(f"Recall@{topk}        {metrics[f'recall@{topk}']:.3f}   95%CI [{ci[0]:.3f}, {ci[1]:.3f}]")
+    print(f"MRR             {metrics['mrr']:.3f}")
+    print(f"nDCG@{topk}         {metrics[f'ndcg@{topk}']:.3f}")
+    print(f"F1              {f1_txt}")
+    print(f"latency         {latency:.2f} ms/query  （含查询编码 + 检索，30 题×3 轮中位数）")
+    print("-" * 62)
+    print(f"→ {out.relative_to(ROOT)}")
+    if reader_state != "ok":
+        print(f"[!] 阅读器未参与（{reader_state}）：F1/EM 记 null，"
+              "等 C 把 reader/extractive_qa.py 的 STUB 换掉后重跑同一条命令即可。")
+    return {"run_id": run_id, "metrics": metrics, "path": str(out)}
 
 
 # ---------------------------------------------------------------------- CLI
@@ -154,10 +255,18 @@ def main() -> int:
     ap.add_argument("--topk", type=int, default=5)
     ap.add_argument("--seed", type=int, default=42)
     ap.add_argument("--n", type=int, default=30, help="dry-run 的题目数")
+    ap.add_argument("--encoder", default="auto", choices=["auto", "onnx", "st", "hash"],
+                    help="稠密编码后端；auto = onnx → st → hash")
+    ap.add_argument("--model-path", default=None,
+                    help="钉住权重文件（复现报告数字请给 models/bge-small-zh-v1.5-onnx/model_int8.onnx）")
+    ap.add_argument("--limit-queries", type=int, default=0, help="只跑前 N 题（调试用）")
+    ap.add_argument("--no-reader", action="store_true", help="只跑检索，不调用阅读器")
     args = ap.parse_args()
 
     if not args.dry_run and args.split != "dry":
-        run_real(args.split, args.topk)   # 内部会 SystemExit
+        run_real(args.split, args.topk, seed=args.seed, backend=args.encoder,
+                 model_path=args.model_path, limit=args.limit_queries,
+                 use_reader=not args.no_reader)
         return 0
 
     res = run_dry(n_questions=args.n, topk=args.topk, seed=args.seed)
