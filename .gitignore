@@ -48,3 +48,6 @@ desktop.ini
 *.gguf
 # matplotlib 缓存（eval/plots.py 会把 MPLCONFIGDIR 指到这里）
 .mplcache/
+
+# 工作区记忆（个人会话笔记，不入库；.workbuddy 目录本身保留在本地）
+.workbuddy/
