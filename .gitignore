@@ -46,3 +46,5 @@ desktop.ini
 *.bin
 *.safetensors
 *.gguf
+# matplotlib 缓存（eval/plots.py 会把 MPLCONFIGDIR 指到这里）
+.mplcache/

@@ -4,3 +4,18 @@
 #   python scripts/download_model.py --fp32          # fp32（4 连接分段续传）
 *.onnx
 *.onnx.part*
+
+# C 追加：重排/阅读器权重（bge-reranker-base 1.1GB、roberta-base-qa 0.4GB，绝不可入库）
+*.safetensors
+*.bin
+*.pt
+*/config.json
+*/tokenizer.json
+*/vocab.txt
+*/sentencepiece.bpe.model
+
+# 具体权重目录（整个目录不入库，换机器按脚本重下）
+bge-reranker-base/
+bge-reranker-base-onnx/
+bge-small-zh-v1.5-onnx/
+roberta-base-chinese-extractive-qa/

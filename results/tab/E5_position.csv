@@ -1,0 +1,9 @@
+﻿run_id,order,max_chars,n_questions,n_retrieved,f1,f1_lo,f1_hi,em,f1_retrieved,gold_kept_rate,gold_kept_f1,gold_position_mean,ctx_chars_mean
+E5_pos_natural_c2000,natural,2000,100,,,,,,,0.98,,,1696.2
+E5_pos_gold_first_c2000,gold_first,2000,100,,,,,,,0.99,,,1698.2
+E5_pos_gold_middle_c2000,gold_middle,2000,100,,,,,,,0.9,,,1705.8
+E5_pos_gold_last_c2000,gold_last,2000,100,,,,,,,0.1,,,1686.8
+E5_pos_natural_c4000,natural,4000,100,,,,,,,0.99,,,2612.7
+E5_pos_gold_first_c4000,gold_first,4000,100,,,,,,,0.99,,,2612.7
+E5_pos_gold_middle_c4000,gold_middle,4000,100,,,,,,,0.99,,,2612.7
+E5_pos_gold_last_c4000,gold_last,4000,100,,,,,,,0.99,,,2612.7

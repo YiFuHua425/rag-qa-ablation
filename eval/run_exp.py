@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import statistics
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -168,7 +170,7 @@ def _chunk_key(cfg_row: dict, strategies: dict | None = None) -> str:
 
 
 class _Lab:
-    """一次运行内复用：语料、查询向量、BM25、doc/块索引。"""
+    """一次运行内复用：语料、查询向量、BM25、doc/块索引、重排器。"""
 
     def __init__(self, mods: dict, cfg: dict, split: str, backend: str,
                  model_path: str | None, limit_queries: int):
@@ -200,6 +202,25 @@ class _Lab:
         self.topk = int(cfg.get("eval", {}).get("topk", 5))
         self._qemb = None
         self._cache: dict[str, dict] = {}
+        self._reranker = None
+        self.rerank_cfg = cfg.get("rerank", {}) or {}
+        self.doc_map = {d["doc_id"]: d["text"] for d in docs}
+
+    def _get_reranker(self):
+        """C 的重排器：懒加载，只有 `rerank: True` 的配置才会碰它。"""
+        if self._reranker is None:
+            from rerank.cross_encoder import Reranker
+
+            lat = self.cfg.get("latency", {}) or {}
+            self._reranker = Reranker(
+                model_name=self.rerank_cfg.get("model", "BAAI/bge-reranker-base"),
+                depth=int(self.rerank_cfg.get("depth", 50)),
+                topn=self.topk,
+                device=str(lat.get("device", "cpu")),
+                max_length=int(self.rerank_cfg.get("max_length", 512)),
+                threads=int(lat.get("threads", 1)),
+            ).set_doc_map(self.doc_map)
+        return self._reranker
 
     @property
     def q_emb(self):
@@ -244,6 +265,12 @@ class _Lab:
             mode = "rrf"
         alpha = float(cfg_row.get("alpha", 0.0)) if mode == "rrf" else None
 
+        rerank = bool(cfg_row.get("rerank"))
+        depth = int(cfg_row.get("depth") or self.rerank_cfg.get("depth", 50)) if rerank else 0
+        pool_n = max(self.topk, depth, 5)
+        reranker = self._get_reranker() if rerank else None
+        rerank_ms: list[float] = []
+
         rankings = []
         for i, q in enumerate(self.questions):
             if mode == "bm25":
@@ -255,16 +282,32 @@ class _Lab:
                 fused = self.m["fuse"]([[(d, 0.0) for d in sparse],
                                          [(d, 0.0) for d in node["dense"][i]]],
                                        weights=[1.0 - alpha, alpha], k=self.fuse_k)
-            top = fused[: max(self.topk, 5)]
+            top = fused[:pool_n]
             if node["chunks"] is None:
                 # 整段档：BM25 与稠密索引的 key 都是 doc_id，直接就是段落排名
-                rankings.append([d for d, _ in top][: self.topk])
+                doc_level = [d for d, _ in top]
             else:
                 # 切块档：chunk_id 是 chunks 列表下标（字符串形式存进索引），压平成段落排名
                 doc_rows = self.m["chunks_to_doc_ranking"]([int(c) for c, _ in top],
                                                            node["chunks"])
-                rankings.append([self.doc_ids[d] for d in doc_rows][: self.topk])
-        return rankings, {"mode": mode, "alpha": alpha, "chunk": key, "node": node}
+                doc_level = [self.doc_ids[d] for d in doc_rows]
+
+            if reranker is not None:
+                # C 的重排（第 3 棒）：只对前 depth 个段落候选重排，取前 topk
+                head = [(d, 0.0) for d in doc_level[:depth]]
+                t_r = time.perf_counter()
+                out = reranker.rerank(q, head, topn=self.topk)
+                rerank_ms.append((time.perf_counter() - t_r) * 1000.0)
+                rankings.append([d for d, _ in out][: self.topk])
+            else:
+                rankings.append(doc_level[: self.topk])
+
+        extra = {"mode": mode, "alpha": alpha, "chunk": key, "node": node}
+        if rerank:
+            extra["rerank"] = True
+            extra["depth"] = depth
+            extra["rerank_ms"] = round(statistics.median(rerank_ms), 3) if rerank_ms else 0.0
+        return rankings, extra
 
     def probe_ms(self, mode: str, alpha: float | None, key: str) -> float:
         """单查询端到端（编码 + 打分 + 融合），30 题 × 3 轮取中位数。"""
@@ -316,10 +359,10 @@ def cmd_real(exp: str, split: str = "smoke", backend: str = "auto",
     ok = skipped = 0
     for cfg_row in configs:
         run_id = cfg_row["run_id"]
-        # 重排 / 位置偏差 / 查询改写不在检索链路上：交给 C 的 rerank 与 B 的 run_e6_rm3.py
-        if cfg_row.get("rerank") or cfg_row.get("order") or cfg_row.get("query_rewrite"):
-            why = ("rerank" if cfg_row.get("rerank") else
-                   ("position" if cfg_row.get("order") else "query_rewrite"))
+        # 位置偏差 / 查询改写不在检索链路上：交给 C 的 run_e5.py 与 B 的 run_e6_rm3.py
+        # （重排自第 3 棒起已接进本入口，见 _Lab.rank）
+        if cfg_row.get("order") or cfg_row.get("query_rewrite"):
+            why = "position" if cfg_row.get("order") else "query_rewrite"
             print(f"{run_id:24s}{'-':>10s}{'-':>8s}{'-':>9s}{'-':>9s}  skip（{why} 见对应脚本）")
             skipped += 1
             continue
@@ -328,10 +371,14 @@ def cmd_real(exp: str, split: str = "smoke", backend: str = "auto",
         met = RE.metrics_dict(rankings, lab.golds, ks=(1, 5, 10, 20), ndcg_k=5)
         met["recall@5_ci"] = RE.recall_ci(rankings, lab.golds, 5, boot_n, boot_alpha, seed)
         met["latency_ms"] = lab.probe_ms(extra["mode"], extra["alpha"], extra["chunk"])
+        if extra.get("rerank"):
+            met["rerank_ms"] = extra["rerank_ms"]
         path = mods["write_run"](
             run_id,
             config={"retriever": extra["mode"], "alpha": extra["alpha"],
                     "chunk": extra["chunk"], "topk": lab.topk, "depth": lab.depth,
+                    "rerank": bool(extra.get("rerank")),
+                    "rerank_depth": extra.get("depth"),
                     "sparse_topk": lab.sparse_topk, "encoder": backend},
             metrics=met,
             per_question=RE.per_question_records(lab.qids, rankings, lab.golds),
