@@ -51,3 +51,6 @@ desktop.ini
 
 # 工作区记忆（个人会话笔记，不入库；.workbuddy 目录本身保留在本地）
 .workbuddy/
+
+# 交付包（bundle/patch 是网络受限时的备用通道，不入库）
+dist/
