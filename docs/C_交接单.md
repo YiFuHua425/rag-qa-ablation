@@ -9,8 +9,8 @@
 | --- | --- | --- | --- |
 | **第 2 棒**（A+B+C 合围） | `context_builder` 最朴素版（top-k 拼接 + 截断 2000）+ 抽取式阅读器单条跑通 | 给 (question, context) 能返回 (answer, score) | ✅ |
 | **第 3 棒**（B、C 并行） | 接 `bge-reranker-base`；加开关 `--rerank on\|off`、`--rerank-depth 20\|50\|100`；固定延迟测法 | 同一批题，`--no-rerank` 与 `--rerank` 都能跑完且数字不同 | ✅ |
-| **第 4 棒**（全员，A 主持） | **E4**：{有重排, 无重排} × {深度 20, 50, 100}，附延迟 | `results/raw/E4_*.json` + `fig/E4_pareto.png` | ✅ 检索/重排指标与延迟齐；F1 列待阅读器权重（见第 7 节） |
-| **第 5 棒**（C 独占） | 位置偏差：`gold_first` / `gold_middle` / `gold_last` + 长上下文档 | `fig/E5_position.png`：首 > 中 > 尾，差异 ≥ 3 点 | ✅ 结构指标（金标保留率）齐：0.99 / 0.90 / 0.10；F1 曲线待权重 |
+| **第 4 棒**（全员，A 主持） | **E4**：{有重排, 无重排} × {深度 20, 50, 100}，附延迟 | `results/raw/E4_*.json` + `fig/E4_pareto.png` | ✅ 指标 + 延迟 + F1 全齐 |
+| **第 5 棒**（C 独占） | 位置偏差：`gold_first` / `gold_middle` / `gold_last` + 长上下文档 | `fig/E5_position.png`：首 > 中 > 尾，差异 ≥ 3 点 | ✅ F1 与保留率全齐；实际是"首 > 尾 ≈ 中"（差约 10 点，非单调） |
 | **第 7 棒**（全员供稿） | 第 4/5 章自己那段分析文字 + PPT 自己那几页 + 讲稿 | 与主线一致 | ✅ |
 
 ---
@@ -46,13 +46,13 @@
         results/fig/E4_pareto.png
 验收方式：python eval/run_e4.py --split smoke --limit-queries 100
 结果（n=100，α=0.2，候选池 100，CPU 单线程）：
-        off   R@1 0.880  R@5 0.980  MRR 0.9220  延迟 5 ms
-        d20   R@1 0.970  R@5 0.990  MRR 0.9775  延迟 4.7 s
-        d50   同 d20                              延迟 11.1 s
-        d100  同 d20                              延迟 22.4 s
-        → 重排把 R@1 拉高 9.0 点、MRR 5.5 点，R@5 只 +1 点；depth 在 20 饱和
-已知限制：F1/EM 为空 —— 阅读器权重下载失败（见第 7 节第 5 条）；
-        重排延迟是 CPU 单线程口径，不代表 GPU
+        off   R@1 0.880  R@5 0.980  MRR 0.9220  F1 0.8136  延迟 0.45 s
+        d20   R@1 0.970  R@5 0.990  MRR 0.9775  F1 0.8337  延迟 4.1 s
+        d50   同 d20                              延迟 8.9 s
+        d100  同 d20                              延迟 16.5 s
+        → 重排把 R@1 拉高 9.0 点、MRR 5.5 点、F1 2.0 点；R@5 只 +1 点；depth 在 20 饱和
+已知限制：重排延迟是 CPU 单线程口径（≈225 ms/候选），不代表 GPU；
+        F1 与 R@5 之间有 16 个点的落差，那是阅读器的锅，E5 接着查
 下一棒是谁：D（收图收表 + 统一样式）、E（写第 5 章重排那段）
 ```
 
@@ -62,12 +62,13 @@
 交付物：eval/run_e5.py、results/raw/E5_pos_*.json（8 份）、results/tab/E5_position.csv、
         results/fig/E5_position.png、200 字结论（附录 C.4）
 验收方式：python eval/run_e5.py --split smoke --limit-queries 100 --max-chars 2000,4000
-结果（n=100，金标进入上下文的比例）：
-        max_chars=2000   natural 0.980 | first 0.990 | middle 0.900 | last 0.100
-        max_chars=4000   四档全部 0.990（5 段全装得下，纯位置对照）
-        → 2000 字预算下把金标放最后，90% 的题答案根本没进上下文
-已知限制：F1 曲线待阅读器权重；2000 档的"尾部落差"混着截断效应，
-        结论必须同时引用 gold_kept_rate，否则会被问"你是不是只是把答案截掉了"
+结果（n=100，F1 / 金标保留率）：
+        max_chars=2000   natural 0.834/0.980 | first 0.840/0.990 | middle 0.674/0.900 | last 0.212/0.100
+        max_chars=4000   natural 0.834/0.990 | first 0.840/0.990 | middle 0.718/0.990 | last 0.731/0.990
+        → 预算紧时"尾部=看不见"（保留率 0.10，F1 掉到 0.21）；
+          预算够时首段最优、中/尾都掉约 10 个点，且中间并不比最后好（lost-in-the-middle）
+已知限制：位置效应与截断效应在 2000 档是耦合的，结论必须同时引用 gold_kept_rate；
+        4000 档四条线的 CI 有重叠，只能下"首段 vs 非首段差约 10 点"这种粗结论
 下一棒是谁：E（这一页是 PPT 的高潮）
 ```
 
@@ -131,17 +132,11 @@ python eval/plots_c.py
 5. **位置偏差与截断的混淆**：`max_chars=2000` 时 5 段上下文里金标放最后常被截断挡掉，
    所以 E5 同时报 `gold_kept_rate`（金标是否进上下文）与 `gold_kept_f1`（只在进得去的题上算），
    并另跑 `max_chars=4000` 的"全部装得下"档做纯位置对照。
-6. **阅读器权重没下下来（最大的遗留）**：`uer/roberta-base-chinese-extractive-qa`（407 MB）
-   在本机环境拿不到 —— huggingface.co 直连 502，hf-mirror 单连接 ~25 KB/s（32 连接也不聚合），
-   ModelScope 没有该仓库的镜像（已逐个探测 `uer/*`、`AI-ModelScope/*`、`Xorbits/*`）。
-   因此 **E4 的 F1/EM、E5 的 F1 曲线暂时为空**，其余指标（Recall / MRR / nDCG / 延迟 /
-   金标保留率）全部为真数字。权重到位后两条命令即可补齐，**重排打分有缓存，不会重跑那 52 分钟**：
-
-   ```bash
-   python eval/run_e4.py --split smoke --limit-queries 100
-   python eval/run_e5.py --split smoke --limit-queries 100 --max-chars 2000,4000
-   python eval/plots_c.py
-   ```
+6. **阅读器权重下载（已解决，但留个记录）**：`uer/roberta-base-chinese-extractive-qa`（407 MB）
+   一开始下不动，不是"带宽差"，是 `hf-mirror.com` 把文件 302 到 `cas-bridge.xethub.hf.co`，
+   而那个节点在本机几乎不通。换成 **`hf-mirror.net`**（直出文件、不跳 xethub）+ 4 连接分段，
+   12 分钟下完，权重 406,799,727 字节、200 个 tensor、`qa_outputs` 齐全。
+   `scripts/download_models_c.py --source hf` 现在默认走 `.net`。
 
 ## 8. 下一棒具体怎么接
 

@@ -43,7 +43,8 @@
 - [11-22] [C] **阅读器不滑窗 = 一半答案在窗外**：CMRC 段落均值 509 字 ≈ 700 token，`max_length=512` 直接截断会把段落后半段（常常就是答案位置）切掉。用 `truncation="only_second"` + `doc_stride=128` 切多窗，再取全局最高分 span。
 - [11-22] [C] **抽取式 QA 的假阳性**：不过滤 `sequence_ids == 1` 时模型可能返回问题里的词（问题与答案共享实体），F1 会虚高；必须只接受 context 侧的 token。
 - [11-22] [C] **位置实验与截断的混淆**：`max_chars=2000` 装不下 5 段（均值 509 字），`gold_last` 常被"超限即停"挡在门外，F1 掉到 0 看着像"尾部位置效应巨大"，其实是"答案没进上下文"。→ `build_context` 返回 `used_doc_ids` 并旁路记录 `gold_used`，E5 同时报 `gold_kept_rate` 与 `gold_kept_f1`，另跑 `max_chars=4000`（全装得下）做纯位置对照。
-- [11-22] [C] **模型权重的三个源**（本机实测）：`huggingface.co` 直连 502；`hf-mirror.com` 必须带 `User-Agent`，单连接 20–300 KB/s、16 连接合计 300 KB/s–4 MB/s，且长连接会 TimeoutError 重试；`modelscope.cn` 单连接 7–12 MB/s，但只有部分仓库有镜像（Xenova 的 BGE 系列有，`uer/roberta-base-chinese-extractive-qa` 没有）。→ 大文件优先 modelscope（`scripts/_fetch.py`），无镜像再走 hf-mirror 分段（`scripts/_dl.py`）。
+- [11-22] [C] **模型权重的源，逐个试过**（本机实测）：`huggingface.co` 直连 502；`hf-mirror.com` 必须带 `User-Agent`，而且**文件下载会 302 到 `cas-bridge.xethub.hf.co`**——那个节点在本机 0–25 KB/s 甚至完全不通（这才是 407 MB 下不来的真正原因，不是"整体带宽差"）；`hf-mirror.net`（另一个域名）**直出文件、不跳 xethub**，1–4 MB/s，4 连接分段 40 秒下完 160 MB；`modelscope.cn` 单连接 7–12 MB/s 但只有部分仓库有镜像（Xenova 的 BGE 系列有，`uer/roberta-base-chinese-extractive-qa` 没有）。→ 大文件先 `curl -I` 看 `Location`：跳 xethub 就换 `hf-mirror.net`；有 modelscope 镜像就走 modelscope（`scripts/_fetch.py`）。
+- [11-22] [C] `ai.gitcode.com/hf_mirrors/...` 虽然页面能打开，但 `resolve/`、`-/raw/` 全部返回 HTML（要 JS/登录），不能当直链用；`mirror.sjtu.edu.cn`、`hf-api.gitee.com`、`aifasthub.com`、`hf.llm.vin`、`moeyy.xyz` 在本机全部 404/握手失败。别再浪费时间试这些。
 - [11-22] [C] **`_dl.py` 的分段续传在 TimeoutError 后会重复写**：重试沿用了进入函数时算好的 `Range` 起点，若上一次已写入 N 字节再失败，重试会从同一位置再写一遍，part 文件体积超过理论份额 → 拼接出来的权重加载失败。跨「不同 `--parts` 次数」复用 part 文件也会错位。→ 换 parts 数或中断后**先删 part 文件**再下；下完必须 `onnxruntime.InferenceSession` / `torch.load` 验一次大小。
 - [ ] 待记：8G 显存下 reranker 的 batch 上限实测（本机无 GPU，C 未测）
 

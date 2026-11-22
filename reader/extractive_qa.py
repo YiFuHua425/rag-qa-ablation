@@ -28,11 +28,14 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
 import numpy as np
 
 STUB = False
+
+PKG_ROOT = Path(__file__).resolve().parents[1]
 
 _IMPORT_HINT = (
     "阅读器需要 torch + transformers：\n"
@@ -69,6 +72,18 @@ class ExtractiveReader:
         self.last_stats: Dict[str, object] = {}
 
     # ------------------------------------------------------------ 懒加载
+    def _resolve_path(self) -> str:
+        """优先用本地权重 ``models/<短名>``，找不到才回退到 HF 仓库名。
+
+        和 ``BgeEncoder`` / ``Reranker`` 保持一致的约定：只要 ``scripts/download_models_c.py``
+        把权重下到 ``models/roberta-base-chinese-extractive-qa/``，不传 ``model_path`` 也能加载，
+        不需要每个人记住绝对路径。
+        """
+        if self.model_path:
+            return str(self.model_path)
+        local = PKG_ROOT / "models" / self.model_name.split("/")[-1]
+        return str(local) if local.exists() else self.model_name
+
     def _ensure_model(self):
         if self._model is not None:
             return self._model
@@ -78,7 +93,7 @@ class ExtractiveReader:
         except Exception as exc:  # pragma: no cover - 依赖缺失时才走到
             raise RuntimeError(_IMPORT_HINT) from exc
 
-        path = self.model_path or self.model_name
+        path = self._resolve_path()
         self._tok = AutoTokenizer.from_pretrained(path, use_fast=True)
         self._model = AutoModelForQuestionAnswering.from_pretrained(path)
         self._model.eval()
@@ -118,6 +133,7 @@ class ExtractiveReader:
             stride=self.doc_stride,
             return_overflowing_tokens=True,
             return_offsets_mapping=True,
+            padding=True,                      # 滑窗出来的 feature 长度不一，批处理必须补齐
             return_tensors=None,
         )
         n_features = len(enc["input_ids"])

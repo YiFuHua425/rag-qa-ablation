@@ -186,7 +186,8 @@ def main() -> int:
                        "gold_position_mean": None,
                        "ctx_chars_mean": round(M.mean(chars), 1)}
 
-            met.update({k: met_retr[k] for k in met_retr})
+            # 检索指标（四个位置都一样）里 f1/em 恒为 None，别把阅读器的 F1 覆盖掉
+            met.update({k: v for k, v in met_retr.items() if k not in ("f1", "em")})
             met["rerank"] = use_rerank
             per_question = []
             for i, rd in enumerate(rows):

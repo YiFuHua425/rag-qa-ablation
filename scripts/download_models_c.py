@@ -13,12 +13,16 @@
 ===============  ==================================  ====================================
 源               URL 格式                             实测
 ===============  ==================================  ====================================
-modelscope       ``/models/<repo>/resolve/master/``   单连接 7 MB/s，**但不支持 HEAD/Range**
-hf-mirror        ``/<repo>/resolve/main/``            单连接 20–30 KB/s，支持 Range 分段
+modelscope       ``/models/<repo>/resolve/master/``   单连接 7–12 MB/s，**但不支持 HEAD/Range**
+hf-mirror.net    ``/<repo>/resolve/main/``            **直出文件不走 xethub，1–4 MB/s**（首选）
+hf-mirror.com    ``/<repo>/resolve/main/``            302 到 cas-bridge.xethub.hf.co，
+                                                     该域常被墙：20–300 KB/s 甚至 0
 ===============  ==================================  ====================================
 
-所以：bge-reranker-base（ModelScope 有镜像）走 modelscope 单流；
-uer 的阅读器（ModelScope 没有）走 hf-mirror 多连接分段。
+所以：bge-reranker-base（ModelScope 有镜像）走 modelscope；
+uer 的阅读器（ModelScope 没有）走 **hf-mirror.net**——`.com` 会把请求 302 到 xethub 的
+CAS 节点，那个域名在本机几乎不通（这也是第一次跑 E4 时 407 MB 下不下来的真正原因，
+不是"网络慢"，是"走错了节点"）。
 不用 ``scripts/_dl.py`` 的地方只有一处差别：modelscope 的 HEAD 返回 ``Content-Length: 0``，
 分段逻辑没法用，直接单流下载。
 """
@@ -106,7 +110,7 @@ def main() -> int:
         if args.source == "modelscope":
             base = f"https://modelscope.cn/models/{spec['repo']}/resolve/master"
         else:
-            base = f"https://hf-mirror.com/{spec['repo']}/resolve/main"
+            base = f"https://hf-mirror.net/{spec['repo']}/resolve/main"
         print(f"\n== {key}: {spec['repo']} → {dst.relative_to(ROOT)}（{args.source}）")
         for name in spec["small"]:
             fetch_small(opener, f"{base}/{name}", dst / name, args.force)

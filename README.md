@@ -116,9 +116,9 @@ pip install -r requirements.txt
   出 Recall@1/5、MRR、F1（阅读器不再是 STUB，F1/EM 是真数字）
 - [x] **第 3 棒（B/C）**：三件套可开关 —— `python eval/run_exp.py --exp smoke` 6/6 全绿
   （重排已接进同一入口，见 `eval/run_exp.py` 的 rerank 分支）
-- [~] **第 4 棒（全员）**：E1–E4 矩阵 —— C 的 E4 已出 Recall/MRR/延迟与 `fig/E4_pareto.png`；
-  F1/EM 列待阅读器权重（`uer/roberta-base-chinese-extractive-qa` 本机下载不到，见 `docs/C_交接单.md` 第 7 节）
-- [~] **第 5 棒（C）**：E5 位置偏差 —— `fig/E5_position.png` + 金标保留率
-  （2000 字：0.98 / 0.99 / 0.90 / 0.10；4000 字：四档 0.99）；F1 曲线同上待权重
+- [x] **第 4 棒（全员）**：E1–E4 矩阵 —— C 的 E4 已出全指标 + 延迟 + `fig/E4_pareto.png`
+  （R@1 0.880→0.970、MRR 0.922→0.978、F1 0.814→0.834；depth 20 饱和）
+- [x] **第 5 棒（C）**：E5 位置偏差 —— `fig/E5_position.png` + 结论
+  （4000 字档：首 0.840 / 自然 0.834 / 尾 0.731 / 中 0.718；2000 字档尾部保留率仅 0.10、F1 0.212）
 - [ ] 第 6 棒（B，可弃）：E6 查询改写 ← B 已提前完成
 - [ ] 第 7 棒（E）：报告 / PPT / 录屏 / 提交
