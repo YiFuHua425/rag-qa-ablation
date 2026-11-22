@@ -196,7 +196,8 @@ def run_real(split: str, topk: int, seed: int = 42, backend: str = "auto",
                 pred, _score = reader.answer(q["question"], ctx)
                 preds.append(pred)
             reader_state = "ok"
-    except (ImportError, NotImplementedError, TypeError, AttributeError) as exc:
+    except (ImportError, NotImplementedError, TypeError, AttributeError,
+            OSError, RuntimeError) as exc:      # C: 权重缺失时也降级，而不是让整条命令崩
         reader_state = f"skipped: {type(exc).__name__}"
 
     if reader_state == "ok" and len(preds) == len(queries):
@@ -241,8 +242,9 @@ def run_real(split: str, topk: int, seed: int = 42, backend: str = "auto",
     print("-" * 62)
     print(f"→ {out.relative_to(ROOT)}")
     if reader_state != "ok":
-        print(f"[!] 阅读器未参与（{reader_state}）：F1/EM 记 null，"
-              "等 C 把 reader/extractive_qa.py 的 STUB 换掉后重跑同一条命令即可。")
+        print(f"[!] 阅读器未参与（{reader_state}）：F1/EM 记 null。")
+        print("    检查 reader/extractive_qa.py 是否 READY，以及权重是否就位："
+              "python scripts/download_models_c.py --only reader")
     return {"run_id": run_id, "metrics": metrics, "path": str(out)}
 
 

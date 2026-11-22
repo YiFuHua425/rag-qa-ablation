@@ -186,3 +186,7 @@ def bootstrap_ci(values: list[float], n: int = 1000, alpha: float = 0.05,
 |---|---|---|---|
 | 11-17 | A | 冻结初版接口 | 全员 |
 | 11-21 | D | 新增 `data/build_data.py`；`dev.jsonl` 每条附加只读字段 `source_id`（CMRC 原始 `DEV_x_QUERY_y`，便于溯源，下游可忽略）；`qid` 统一为 `dev_0001` 形式 | 无破坏性：必需字段与类型不变 |
+| 11-22 | C | `rerank/cross_encoder.py`、`reader/context_builder.py`、`reader/extractive_qa.py` 三个 STUB 换成真实现；**冻结签名一个没动**，只在构造函数里加了可选参数（`model_path` / `batch_size` / `threads` / `doc_map` / `score_threads` 等），旧调用方式照旧可用 | 无破坏性 |
+| 11-22 | C | `build_context` 新增**旁路诊断**：每次调用后可用 `reader.context_builder.get_last_stats()` 读取 `gold_used` / `gold_position` / `dropped_doc_ids` 等。返回值仍是 `(text, used_doc_ids)` 二元组，E5 需要这些字段才能区分"金标没进上下文"与"读错了" | 新增能力，不改签名 |
+| 11-22 | C | 新增 `eval/c_pipeline.py`（E4/E5 共用链路 + 候选/重排缓存）、`eval/run_e4.py`、`eval/run_e5.py`、`eval/plots_c.py`、`scripts/download_models_c.py`、`tests/test_c_modules.py` | 纯新增文件 |
+| 11-22 | C | `Reranker.rerank()` 的语义明确为：**只重排前 `depth` 个候选，其余候选原序保留在返回列表尾部**（`topn` 只截断返回长度）。理由：E4 的 Recall@5 在重排后前 5 名上算，丢候选会让指标无法解释 | 语义澄清，不改签名 |
