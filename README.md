@@ -161,3 +161,17 @@ python demo.py --list               # 列出可演示的题目
 
 依赖分层：**检索侧只需 numpy + onnxruntime + jieba**；阅读器与重排需要 torch + 权重，
 缺失时不报错、只打印「跳过 + 怎么装」。
+
+## 成员与 GitHub 账号对照
+
+| 成员 | 角色 | GitHub 账号 | 提交数 |
+|---|---|---|---|
+| 颜福洪 | A 系统集成与协调 | `YiFuHua425` | 13 |
+| 龙新月 | B 检索与融合 | `FUYU0v0` | 2 |
+| 王文超 | C 重排与阅读器 | `yytwwg` | 5 |
+| 孔得地 | D 数据与评测 | `xiao-ning77` | 1 |
+| 袁毅 | E 报告与呈现 | `122322-xx` | 0（负责文档/PPT，不产生代码提交） |
+
+> 提交数为 2026-11-23 快照。C 的 5 个提交早期署名为占位值 `C <c@example.com>`
+> （当时他没有写权限，是以 bundle/patch 离线交付的），现由仓库根的 `.mailmap`
+> 归因到真实账号。本地验证：`git log --use-mailmap --format='%aN' HEAD`。

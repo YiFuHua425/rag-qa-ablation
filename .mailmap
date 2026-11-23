@@ -1,0 +1,24 @@
+# .mailmap —— 把历史提交里的占位署名归到真实 GitHub 身份
+#
+# 背景：C（王文超）当时还没有仓库写权限，是以 git bundle / patch 离线交付的，
+# 提交保留了他本机的占位配置 `C <c@example.com>`。该邮箱是保留域名，无法在
+# GitHub 上验证，因此只能通过本文件做归因映射。
+#
+# 格式：正确姓名 <正确邮箱>  历史姓名 <历史邮箱>
+# GitHub 的提交列表、blame 与贡献者统计会按此文件归因（可能需几分钟生效）。
+# 本地验证：git shortlog -sn --use-mailmap
+#
+# noreply 邮箱 = <GitHub 数字ID>+<登录名>@users.noreply.github.com
+# 用它可以被 GitHub 自动认领，且不必公开真实邮箱。
+
+王文超 <291256383+yytwwg@users.noreply.github.com>  C <c@example.com>
+
+# ── 其余成员的历史提交本已正确归属，无需映射 ─────────────────────────
+# 颜福洪    YiFuHua425   13 个提交
+# 龙新月    FUYU0v0       2 个提交
+# 孔得地    xiao-ning77   1 个提交
+# 袁毅      122322-xx     0 个提交（负责报告/PPT，不产生代码提交）
+#
+# 今后各自按下列方式配置，就不会再出现占位署名：
+#   git config --global user.name  "真实姓名"
+#   git config --global user.email "<数字ID>+<登录名>@users.noreply.github.com"
