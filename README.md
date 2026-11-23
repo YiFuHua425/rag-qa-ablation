@@ -142,3 +142,22 @@ pip install -r requirements.txt
 
 > 给 E 的入口：先读 `report/00_目录与章节分工.md`（页数预算与压缩顺序），
 > 第 5 章的数字**只从** `report/主结果总表.md` 取，不要自己算。
+
+## 单题链路演示（`demo.py`）
+
+一条命令把「检索 → 融合 → 重排 → 拼装 → 抽取」全链路摊开，**用于录屏与 PPT 截图**。
+自动挑一题「一路没召回 / 融合有提升」的样本，让每一步的差异看得见。
+
+```powershell
+python demo.py                      # 自动选题（默认 smoke，约 5 秒，缓存已暖时）
+python demo.py --alpha 0.2          # 用 E2 扫出的最优融合权重
+python demo.py --index 3            # 指定某题
+python demo.py --question "苹果公司的创始人是谁"   # 自定义问题（无金标）
+python demo.py --list               # 列出可演示的题目
+```
+
+输出分 9 段：装配 → 分词 → 稀疏路 → 稠密路 → RRF → （可选）重排 → 上下文拼装 → 阅读器 → 小结。
+小结那张表就是全篇的论证结构：同一个金标在 BM25 / 稠密 / 融合 / 重排 下各排第几。
+
+依赖分层：**检索侧只需 numpy + onnxruntime + jieba**；阅读器与重排需要 torch + 权重，
+缺失时不报错、只打印「跳过 + 怎么装」。
