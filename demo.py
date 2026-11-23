@@ -333,10 +333,12 @@ def main() -> int:
             from reader.extractive_qa import ExtractiveReader
             from eval.metrics import em as em_fn, f1 as f1_fn
             rcfg = cfg.get("reader", {}) or {}
+            # 演示固定走 CPU：与第 5 章的延迟口径一致，也避免无 GPU 机器上报 CUDA 错
+            dev = str((cfg.get("latency", {}) or {}).get("device", "cpu"))
             reader = ExtractiveReader(
                 model_name=rcfg.get("model", "uer/roberta-base-chinese-extractive-qa"),
                 max_length=int(rcfg.get("max_length", 512)),
-                device=str(rcfg.get("device", "cpu")))
+                device=dev)
             t0 = time.perf_counter()
             pred, score = reader.answer(query["question"], context)
             ms = (time.perf_counter() - t0) * 1000
