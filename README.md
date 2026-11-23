@@ -134,7 +134,7 @@ pip install -r requirements.txt
 | `results/tab/主结果总表.csv` | E1–E6 共 29 行，含 split/n/CI/延迟/来源 run_id | A | ✅ |
 | `report/第2章_相关工作.md` | BM25 → DPR → ColBERT → RRF → RAG | B | ✅ |
 | `report/第3章_算法原理.md` | 形式化 + 五个组件的公式与取舍 | **A** | ✅ |
-| `report/第4章_实现过程.md` | 环境 / 数据 / 超参 / 6 个实现细节 / 踩坑 / 复现 | **D**（A 汇编） | ✅ |
+| `report/第4章_实现过程.md` | 环境 / 数据 / 超参 / 6 个实现细节 / 踩坑 / 复现 | **D** | ✅ |
 | `report/附录B_检索实验记录.md` | E2 / E3 / E6 明细 | B | ✅ |
 | `report/附录C_重排与位置实验记录.md` | E4 / E5 明细 | C | ✅ |
 | `results/fig/架构图.png` | 图 3-1 系统架构与数据流 | A | ✅ |
