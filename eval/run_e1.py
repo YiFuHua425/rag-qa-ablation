@@ -184,9 +184,19 @@ def run_real(split: str, topk: int, seed: int = 42, backend: str = "auto",
             from reader.context_builder import build_context
 
             doc_map = {d["doc_id"]: d for d in docs}
-            reader = _rq.ExtractiveReader()
+            # 阅读器默认单线程；这里开多线程算分（只影响速度，不改指标）。
+            # 上下文 2000 字要切多窗，单线程实测约 3.9 s/题，500 题要 32 分钟。
+            import os as _os
+
+            _st = max(1, (_os.cpu_count() or 3) - 2)
+            reader = _rq.ExtractiveReader(threads=1, score_threads=_st)
             ctx_cfg = cfg.get("context", {})
-            for q, ranked in zip(queries, rankings):
+            import time as _t
+
+            n_q = len(queries)
+            print(f"  [reader] 开始逐题推理：{n_q} 题（{_st} 线程算分）", flush=True)
+            _t0 = _t.perf_counter()
+            for i, (q, ranked) in enumerate(zip(queries, rankings), 1):
                 ctx, _used = build_context(
                     ranked[:topk], doc_map,
                     order=ctx_cfg.get("order", "natural"),
@@ -195,6 +205,11 @@ def run_real(split: str, topk: int, seed: int = 42, backend: str = "auto",
                 )
                 pred, _score = reader.answer(q["question"], ctx)
                 preds.append(pred)
+                # 500 题闷头跑几十分钟、期间零输出，会被误判成"卡死"，所以每 25 题报一次
+                if i % 25 == 0 or i == n_q:
+                    el = _t.perf_counter() - _t0
+                    eta = el / i * (n_q - i)
+                    print(f"  [reader] {i}/{n_q}　已用 {el:.0f}s　预计还需 {eta:.0f}s", flush=True)
             reader_state = "ok"
     except (ImportError, NotImplementedError, TypeError, AttributeError,
             OSError, RuntimeError) as exc:      # C: 权重缺失时也降级，而不是让整条命令崩
