@@ -21,74 +21,99 @@
 
 ---
 
-## 1. A（颜福洪）的机器：只演示检索侧，约 5 秒
+## 1. 现在的环境状态（已就绪，两台机器都能跑完整链路）
 
-你的机器没有 torch，**阅读器与重排会自动跳过**，前面七段照常出数——这对录屏已经够用
-（论证结构全在检索侧）。
+2026-11-23 在 A 的机器上装完了全部依赖与权重，实测跑通含重排与 F1 的完整链路：
+
+| 项 | 状态 |
+|---|---|
+| 解释器 | `C:\Users\20102\AppData\Local\Programs\Python\Python312\python.exe`（3.12.10，终端里的 `python`） |
+| 依赖 | torch 2.15.0 / transformers 5.24.0 / onnxruntime 1.31.1 / jieba 0.42.1 / pyyaml 6.0.3 |
+| 权重 | `models/bge-small-zh-v1.5-onnx`（23 MB）、`models/bge-reranker-base`（1082 MB）、`models/roberta-base-chinese-extractive-qa`（406,799,727 字节） |
+| 向量缓存 | `.cache/emb/emb_demo_paragraph_onnx-...n3507.npz`（命中后 47 ms） |
+
+实测耗时：**首次编码全库 55 s（只一次）→ 之后完整链路 15 s**（重排 8.3 s + 阅读器 1.0 s + 检索 0.1 s）。
 
 ```powershell
 cd D:\git\机器学习.汇报
 
-# 一次性准备（已做过可跳过）
-python scripts/download_model.py --parts 1        # 稠密编码器 int8，22.8 MB
-
-# 每次演示
-python demo.py --alpha 0.2                        # 自动挑一题，约 5 秒
-python demo.py --index 3                          # 指定第 4 题
-python demo.py --list                             # 看有哪些题
+python demo.py --alpha 0.2 --rerank              # 完整链路，约 15 秒
+python demo.py --alpha 0.2                       # 跳过重排，约 6 秒
+python demo.py --index 3 --rerank                # 指定第 4 题
+python demo.py --list                            # 看有哪些题
 python demo.py --question "苹果公司的创始人是谁"    # 现场自定义提问（无金标）
+python demo.py --score-threads 8 --rerank        # 限线程（默认 cpu_count-2） 
 ```
 
-> 首次运行会编码 3507 段（约 55 秒）并写入 `.cache/emb/`；第二次起命中缓存，5 秒内跑完。
-> **录屏前先跑一遍预热。**
+自动选题是**两遍扫描**：先只在「答案 ≤18 字」的题里找（长答案 F1 天生低），找不到才放宽；
+优先级是「一路没召回→融合救回」>「融合比两路都好」>「两路分歧大」。
 
-预期结尾：
+预期结尾（实测结果，题目 `dev_2414`）：
 
 ```
 【8】小结（这张表就是全篇的论证结构）
   配置                金标名次
   ------------------------
-  BM25 单路              3
-  稠密单路               5
-  RRF 融合               2
-  → 实际用于回答的是「RRF 融合」，金标名次 2。
-     融合把最好的单路从第 3 位提升到第 2 位 —— 这正是混合检索的收益。
+  BM25 单路              1
+  稠密单路             未召回
+  RRF 融合               5
+  重排后                 1
+
+  → 实际用于回答的是「重排后」，金标名次 1。
+     重排把金标从融合后的第 5 位顶到第 1 位 —— 精排在这一题上决定性地救回来了。
 ```
+
+这一题把全篇论证演全了：BM25 命中 → 稠密漏召 → 融合被稀释到第 5 → 精排救回第 1，
+最后阅读器抽出 `高桥俊昌`，**F1 = 1.0000，EM = 1**。
 
 ---
 
-## 2. C（王文超）的机器：完整链路，含重排与 F1
+## 2. 换机器 / C 的机器：从零装一遍
 
-你的机器有 torch + `bge-reranker-base` + 阅读器权重（跑 E4/E5 时已下过），
-所以**只有你能跑出第【5】段重排和第【7】段的 F1/EM 真数字**——这正是你最该验证的部分：
-`rerank/cross_encoder.py`、`reader/context_builder.py`、`reader/extractive_qa.py` 三个模块被真实调用。
+C 的机器还留着 E4/E5 时期的权重，可直接跳到 2.2；新机器照下面走（含这次踩到的两个坑）。
+这段也是**验收 C 那三个模块**的最短路径：`rerank/cross_encoder.py`、`reader/context_builder.py`、
+`reader/extractive_qa.py` 会被真实调用。
 
 ### 2.1 准备（一次性）
 
 ```powershell
 cd <你的仓库路径>
-git pull                                   # 拿到 demo.py（若还没有）
+git pull                                    # 拿到 demo.py
 
-# ① 数据：jsonl 不入 git，必须本机重建
+# ① 依赖（约 200 MB，实测 4–8 分钟；torch 走清华源可能冷缓存较慢）
+pip install torch transformers -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install onnxruntime pyyaml              # 若还没有
+pip install jieba                           # ⚠ 不要加 --only-binary :all:，它只有 sdist
+
+# ② 数据：jsonl 不入 git，必须本机重建
 python data/build_data.py --sample 20
 python eval/check_data.py --strict          # 四项断言必须全过
 python eval/check_data.py --make-smoke 500
 
-# ② 稠密编码器（22.8 MB）—— 你之前复用 B 的候选缓存，可能没有这个权重
-python scripts/download_model.py --parts 1
-
-# ③ 你已有的权重：确认在
-dir models
-#   bge-reranker-base\                （约 1.1 GB）
-#   bge-small-zh-v1.5-onnx\           （22.8 MB，上一步下的）
-#   roberta-base-chinese-extractive-qa\ （约 407 MB）
+# ③ 三个权重（合计约 1.5 GB，实测 2–3 分钟）
+python scripts/download_model.py --parts 1                                  # 稠密编码器 23 MB
+python scripts/download_models_c.py --source modelscope --only rerank       # 1082 MB，13.6 MB/s
+python scripts/download_models_c.py --source hf --only reader --parts 4     # 406.8 MB，9.2 MB/s
 ```
 
-若哪个缺，补齐：
+**踩坑 1：reader 分段下载会留错位的 part 文件。**
+若中断过或重试过，`models/roberta-base-chinese-extractive-qa/` 里会剩下
+`pytorch_model.bin.part0..3`，四段加起来 **大于** 406.8 MB（我这次是 468 MB）。
+合并会得到坏文件。务必先删再下：
 
 ```powershell
-python scripts/download_models_c.py --source modelscope --only rerank
-python scripts/download_models_c.py --source hf --only reader --parts 16
+del models\roberta-base-chinese-extractive-qa\*.part*
+python scripts/download_models_c.py --source hf --only reader --parts 4
+dir models\roberta-base-chinese-extractive-qa\pytorch_model.bin   # 必须是 406,799,727 字节
+```
+
+**踩坑 2：`pip install ... --only-binary :all:` 会让整批安装失败。**
+jieba 只有 sdist，pip 解析阶段就会整体报错，连 torch 都不会装。所以 jieba 单独装。
+
+装完自检：
+
+```powershell
+python -c "import torch,transformers,onnxruntime,jieba;print(torch.__version__,transformers.__version__)"
 ```
 
 ### 2.2 跑完整版
@@ -102,16 +127,20 @@ python demo.py --rerank --alpha 0.2
 ```
 【5】重排：交叉编码器（bge-reranker-base）　　只重排前 20 个候选
   名次  doc_id          重排分   金标
-  1     p_01809         0.8412
-  2     p_02433         0.7735   ★
-  → 金标名次：2
-  耗时 3620 ms（CPU 单线程 ≈ 181 ms/候选）
+  1     p_03052        -2.0147   ★
+  2     p_01733        -4.2118
+  → 金标名次：1
+  耗时 8316 ms（22 线程算分，416 ms/候选）
+  注：报告里的延迟口径是 CPU 单线程 ≈225 ms/候选（见 E4），此处为吞吐口径
 
 【7】抽取式阅读器（在上下文里定位答案片段）
-  预测答案 '拜占庭式建筑风格'　score 12.4471　444 ms
-  标准答案 '拜占庭式建筑风格'
+  预测答案 '高桥俊昌'　score 19.6349　1011 ms
+  标准答案 '高桥俊昌'
   F1 1.0000　EM 1
 ```
+
+> 重排默认用 `cpu_count-2` 线程算分（与 `run_e4` 同一公式）。只用 1 线程时这一步会从
+> 8.3 s 涨到 26 s——之前 demo 就是这个毛病，已修。用 `--score-threads N` 可覆盖。
 
 ### 2.3 你该重点看什么
 

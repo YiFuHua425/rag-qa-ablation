@@ -64,45 +64,61 @@ def rank_of(ids, target) -> int | None:
     return ids.index(target) + 1 if (target and target in ids) else None
 
 
-def pick_interesting(queries, bm25, index, encoder, alpha, fuse_k, depth, scan: int = 40):
+def pick_interesting(queries, bm25, index, encoder, alpha, fuse_k, depth,
+                     scan: int = 60, short_answer: int = 18):
     """自动挑一题「能说明问题」的，返回 (下标, 理由)。
 
+    两遍扫描：
+      ① 只在**短答案**（≤18 字）的题里找 —— 抽取式阅读器对长答案 F1 天生偏低，
+         演示要看"答对了"才算成功；
+      ② 找不到就放宽到全部题。
     优先级：一路没召回→另一路召回（融合能救）> 融合比单路都好 > 两路分歧大。
     """
     from retrieval.rrf import alpha_weights, fuse
 
-    cand = [q for q in queries[:scan] if q.get("gold_doc_id")]
-    if not cand:
+    pool = [q for q in queries[:scan] if q.get("gold_doc_id")]
+    if not pool:
         return 0, "（没有带金标的题）"
-    embs = encoder.encode_queries([q["question"] for q in cand], show_progress=False)
+    embs = encoder.encode_queries([q["question"] for q in pool], show_progress=False)
     weights = alpha_weights(alpha)
-    best = None
-    for i, q in enumerate(cand):
-        gold = q["gold_doc_id"]
-        s_ids = [d for d, _ in bm25.search(q["question"], topk=depth)]
-        d_ids = [d for d, _ in index.search(embs[i], topk=depth)]
-        f_ids = [d for d, _ in fuse([[(x, 0.0) for x in s_ids],
-                                     [(x, 0.0) for x in d_ids]], weights=weights, k=fuse_k)]
-        rs, rd, rf = rank_of(s_ids, gold), rank_of(d_ids, gold), rank_of(f_ids, gold)
-        # 「融合比两路各自都好」才是有说服力的故事，优先选这类
-        fused_better = rf is not None and (rs is None or rf < rs) and (rd is None or rf < rd)
-        one_missed = (rs is None) != (rd is None)
-        if fused_better and one_missed:
-            case = (0, f"一路没召回，融合把金标顶到第 {rf} 位（互补生效）")
-        elif fused_better:
-            case = (1, f"单路各第 {rs}/{rd} 位，融合后升到第 {rf} 位")
-        elif one_missed:
-            case = (2, f"一路没召回（{'BM25' if rs is None else '稠密'}），"
-                       f"融合后金标第 {rf or '未召回'} 位")
-        elif rs and rd and abs(rs - rd) >= 3:
-            case = (3, f"两路分歧明显（BM25 第 {rs} / 稠密 第 {rd}）")
-        else:
-            continue
-        if best is None or case[0] < best[0]:
-            best = (case[0], i, case[1])
+
+    def _scan(cands):
+        best = None
+        for q in cands:
+            idx = pool.index(q)
+            gold = q["gold_doc_id"]
+            s_ids = [d for d, _ in bm25.search(q["question"], topk=depth)]
+            d_ids = [d for d, _ in index.search(embs[idx], topk=depth)]
+            f_ids = [d for d, _ in fuse([[(x, 0.0) for x in s_ids],
+                                         [(x, 0.0) for x in d_ids]],
+                                        weights=weights, k=fuse_k)]
+            rs, rd, rf = rank_of(s_ids, gold), rank_of(d_ids, gold), rank_of(f_ids, gold)
+            fused_better = rf is not None and (rs is None or rf < rs) and (rd is None or rf < rd)
+            one_missed = (rs is None) != (rd is None)
+            if fused_better and one_missed:
+                case = (0, f"一路没召回，融合把金标顶到第 {rf} 位（互补生效）")
+            elif fused_better:
+                case = (1, f"单路各第 {rs}/{rd} 位，融合后升到第 {rf} 位")
+            elif one_missed:
+                case = (2, f"一路没召回（{'BM25' if rs is None else '稠密'}），"
+                           f"融合后金标第 {rf or '未召回'} 位")
+            elif rs and rd and abs(rs - rd) >= 3:
+                case = (3, f"两路分歧明显（BM25 第 {rs} / 稠密 第 {rd}）")
+            else:
+                continue
+            key = (case[0], len(str(q.get("answer_text") or "")))
+            if best is None or key < best[0]:
+                best = (key, idx, case[1])
+        return best
+
+    short = [q for q in pool if len(str(q.get("answer_text") or "")) <= short_answer]
+    best = _scan(short) if short else None
+    tag = ""
+    if best is None:
+        best, tag = _scan(pool), "（已放宽答案长度）"
     if best is None:
         return 0, f"（前 {scan} 题没有明显分歧，用第 0 题）"
-    return best[1], best[2]
+    return best[1], best[2] + tag
 
 
 def main() -> int:
@@ -117,6 +133,8 @@ def main() -> int:
     ap.add_argument("--max-chars", type=int, default=None, help="上下文上限，默认取 config.yaml")
     ap.add_argument("--model-path", default=None, help="编码器权重（默认自动找 models/ 下的 int8）")
     ap.add_argument("--rerank", action="store_true", help="额外演示交叉编码器重排（需 torch）")
+    ap.add_argument("--score-threads", type=int, default=None,
+                    help="算分线程数（默认 cpu_count-2，与 run_e4 一致；延迟仍按单线程口径报）")
     ap.add_argument("--no-reader", action="store_true", help="跳过阅读器")
     ap.add_argument("--list", action="store_true", help="列出可演示的题目")
     args = ap.parse_args()
@@ -128,6 +146,13 @@ def main() -> int:
 
         import jieba
         jieba.setLogLevel(logging.ERROR)
+    except Exception:
+        pass
+    # transformers v5 加载权重时默认刷 "Loading weights: 100%|..." 进度条，一并静音
+    try:
+        import transformers
+        transformers.logging.disable_progress_bar()
+        transformers.logging.set_verbosity_error()
     except Exception:
         pass
 
@@ -159,6 +184,11 @@ def main() -> int:
                     else cfg.get("context", {}).get("max_chars", 2000))
     topk = int(args.topk)
     depth = max(int(args.depth), topk)
+    # 算分线程：与 run_e4 同一公式（cpu_count-2）。延迟仍按单线程口径单独测，
+    # 否则在 24 核机器上重排会退化成 1 线程、慢 5 倍。
+    import os as _os
+    score_threads = int(args.score_threads) if args.score_threads else max(1, (_os.cpu_count() or 3) - 2)
+    lat_cfg = cfg.get("latency", {}) or {}
 
     print(BAR)
     print(" 检索增强问答 · 单题链路演示")
@@ -285,9 +315,10 @@ def main() -> int:
             lat = cfg.get("latency", {}) or {}
             rcfg = cfg.get("rerank", {}) or {}
             rk = Reranker(model_name=rcfg.get("model", "BAAI/bge-reranker-base"),
-                          depth=depth, topn=topk, device=str(lat.get("device", "cpu")),
+                          depth=depth, topn=topk, device=str(lat_cfg.get("device", "cpu")),
                           max_length=int(rcfg.get("max_length", 512)),
-                          threads=int(lat.get("threads", 1))).set_doc_map(doc_map)
+                          threads=int(lat_cfg.get("threads", 1)),
+                          score_threads=score_threads).set_doc_map(doc_map)
             t0 = time.perf_counter()
             out = rk.rerank(query["question"], fused[:depth], topn=topk)
             ms = (time.perf_counter() - t0) * 1000
@@ -296,7 +327,8 @@ def main() -> int:
             for i, (did, sc) in enumerate(out, 1):
                 print(f"  {_w(i, 6)}{_w(did, 12)}{sc:>10.4f}   {'★' if did == gold else ''}")
             n = max(1, min(depth, len(fused)))
-            print(f"  耗时 {ms:.0f} ms（CPU 单线程 ≈ {ms/n:.0f} ms/候选）")
+            print(f"  耗时 {ms:.0f} ms（{score_threads} 线程算分，{ms/n:.0f} ms/候选）")
+            print(f"  注：报告里的延迟口径是 CPU 单线程 ≈225 ms/候选（见 E4），此处为吞吐口径")
         except Exception as exc:
             first = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:70]
             print(f"  [跳过] 重排不可用：{first}")
@@ -334,11 +366,13 @@ def main() -> int:
             from eval.metrics import em as em_fn, f1 as f1_fn
             rcfg = cfg.get("reader", {}) or {}
             # 演示固定走 CPU：与第 5 章的延迟口径一致，也避免无 GPU 机器上报 CUDA 错
-            dev = str((cfg.get("latency", {}) or {}).get("device", "cpu"))
+            dev = str(lat_cfg.get("device", "cpu"))
             reader = ExtractiveReader(
                 model_name=rcfg.get("model", "uer/roberta-base-chinese-extractive-qa"),
                 max_length=int(rcfg.get("max_length", 512)),
-                device=dev)
+                device=dev,
+                threads=int(lat_cfg.get("threads", 1)),
+                score_threads=score_threads)
             t0 = time.perf_counter()
             pred, score = reader.answer(query["question"], context)
             ms = (time.perf_counter() - t0) * 1000
@@ -367,20 +401,36 @@ def main() -> int:
 
         singles = [r for r in (r_s, r_d) if r]
         best_single = min(singles) if singles else None
+        # 与「上一步」比：有重排就跟融合比，否则跟最好的单路比
+        if reranked_ids:
+            prev_val, prev_name = r_f, "RRF 融合"
+        else:
+            prev_val, prev_name = best_single, "最好的单路"
         print(f"\n  → 实际用于回答的是「{final_name}」，金标名次 "
               f"{r_final if r_final else '未召回'}。")
         if r_final is None:
-            print("     三路都没召回金标：纯检索失败，下游无从补救。")
+            print("     金标没进最终排名：纯检索失败，下游无从补救。")
         elif r_final == 1:
-            print("     金标已在第 1 位，检索侧无损失——答对与否只取决于阅读器与上下文预算。")
-        elif best_single and r_final < best_single:
-            print(f"     融合把最好的单路从第 {best_single} 位提升到第 {r_final} 位 —— 这正是混合检索的收益。")
-        elif best_single and r_final > best_single:
-            print(f"     ⚠ 融合反而把金标从第 {best_single} 位挤到第 {r_final} 位 ——")
-            print(f"       说明 α={alpha} 这一权重对本语料并不最优（E2 扫出 α=0.2 最好），")
-            print(f"       可加 --alpha 0.2 复现报告的最优配置后再看。")
+            if reranked_ids and r_f and r_f > 1:
+                print(f"     重排把金标从融合后的第 {r_f} 位顶到第 1 位 —— 精排在这一题上决定性地救回来了。")
+            elif not reranked_ids and prev_val and prev_val > 1:
+                print(f"     {prev_name} 把金标从第 {prev_val} 位提升到第 1 位 —— 混合检索的收益。")
+            else:
+                print("     金标已在第 1 位，检索侧无损失——答对与否只取决于阅读器与上下文预算。")
+        elif prev_val and r_final < prev_val:
+            print(f"     {prev_name} 把金标放在第 {prev_val} 位，{final_name} 提升到第 {r_final} 位"
+                  f"—— 这一步是有效收益。")
+        elif prev_val and r_final > prev_val:
+            print(f"     ⚠ {final_name} 反而把金标从第 {prev_val} 位挤到第 {r_final} 位。")
+            if reranked_ids:
+                print("       单题上精排可能变差（交叉编码器只建模局部相关性）；")
+                print("       E4 报的 R@1 +9 个点是 100 题平均，这一题正好用来说明「精排不是万灵药」。")
+                print("       想看重排有效的样本：换题再跑，如 python demo.py --rerank --index 2")
+            else:
+                print(f"       说明 α={alpha} 对本语料不是最优（E2 扫出 α=0.2 最好），")
+                print("       可加 --alpha 0.2 复现报告的最优配置后再看。")
         else:
-            print("     融合与最好的单路持平：这一题两路召回高度重合，没有互补空间。")
+            print(f"     {final_name} 与 {prev_name} 名次相同：这一步没有改变排序。")
     else:
         print("  自定义问题没有金标：跳过名次对比，上面各步的 top-k 即最终结果。")
 
