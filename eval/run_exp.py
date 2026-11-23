@@ -367,26 +367,34 @@ def cmd_real(exp: str, split: str = "smoke", backend: str = "auto",
             skipped += 1
             continue
 
-        rankings, extra = lab.rank(cfg_row)
-        met = RE.metrics_dict(rankings, lab.golds, ks=(1, 5, 10, 20), ndcg_k=5)
-        met["recall@5_ci"] = RE.recall_ci(rankings, lab.golds, 5, boot_n, boot_alpha, seed)
-        met["latency_ms"] = lab.probe_ms(extra["mode"], extra["alpha"], extra["chunk"])
-        if extra.get("rerank"):
-            met["rerank_ms"] = extra["rerank_ms"]
-        path = mods["write_run"](
-            run_id,
-            config={"retriever": extra["mode"], "alpha": extra["alpha"],
-                    "chunk": extra["chunk"], "topk": lab.topk, "depth": lab.depth,
-                    "rerank": bool(extra.get("rerank")),
-                    "rerank_depth": extra.get("depth"),
-                    "sparse_topk": lab.sparse_topk, "encoder": backend},
-            metrics=met,
-            per_question=RE.per_question_records(lab.qids, rankings, lab.golds),
-            meta={"split": split, "n_questions": len(lab.questions)},
-            cfg=cfg,
-        )
-        print(f"{run_id:24s}{met['recall@5']:10.4f}{met['mrr']:8.4f}{met['ndcg@5']:9.4f}"
-              f"{met['latency_ms']:9.2f}  OK → {path.name}")
+        try:
+            rankings, extra = lab.rank(cfg_row)
+            met = RE.metrics_dict(rankings, lab.golds, ks=(1, 5, 10, 20), ndcg_k=5)
+            met["recall@5_ci"] = RE.recall_ci(rankings, lab.golds, 5, boot_n, boot_alpha, seed)
+            met["latency_ms"] = lab.probe_ms(extra["mode"], extra["alpha"], extra["chunk"])
+            if extra.get("rerank"):
+                met["rerank_ms"] = extra["rerank_ms"]
+            path = mods["write_run"](
+                run_id,
+                config={"retriever": extra["mode"], "alpha": extra["alpha"],
+                        "chunk": extra["chunk"], "topk": lab.topk, "depth": lab.depth,
+                        "rerank": bool(extra.get("rerank")),
+                        "rerank_depth": extra.get("depth"),
+                        "sparse_topk": lab.sparse_topk, "encoder": backend},
+                metrics=met,
+                per_question=RE.per_question_records(lab.qids, rankings, lab.golds),
+                meta={"split": split, "n_questions": len(lab.questions)},
+                cfg=cfg,
+            )
+            print(f"{run_id:24s}{met['recall@5']:10.4f}{met['mrr']:8.4f}{met['ndcg@5']:9.4f}"
+                  f"{met['latency_ms']:9.2f}  OK → {path.name}")
+        except Exception as exc:
+            # 缺依赖（torch）或缺权重时只跳过这一条，不能让整个矩阵崩掉
+            msg = str(exc).strip().splitlines()
+            reason = (msg[0][:58] if msg else type(exc).__name__)
+            print(f"{run_id:24s}{'-':>10s}{'-':>8s}{'-':>9s}{'-':>9s}  SKIP（{reason}）")
+            skipped += 1
+            continue
         ok += 1
 
     print("-" * 78)
