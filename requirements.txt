@@ -7,7 +7,12 @@ tqdm>=4.66
 pyyaml>=6.0
 
 # --- 检索（B）---
-# 有 NVIDIA GPU 用这个（CUDA 12.1）；纯 CPU 把 torch 换成 cpu 版即可
+# 纯 CPU：pip install torch（清华源给的是 +cpu 版，189 MB）
+# 要 GPU（已实测 2026-11-24）：官方源在本机只有 11 KB/s，用上海交大镜像 + curl 续传
+#   curl -C - -o torch-2.14.1+cu126-cp312-cp312-win_amd64.whl \
+#     https://mirror.sjtu.edu.cn/pytorch-wheels/cu126/torch-2.14.1%2Bcu126-cp312-cp312-win_amd64.whl
+#   pip install --no-deps torch-2.14.1+cu126-cp312-cp312-win_amd64.whl
+#   注意：wheel 文件名不能改；cu126 最高只到 2.14.1
 torch>=2.1
 transformers>=4.40
 sentence-transformers>=2.7

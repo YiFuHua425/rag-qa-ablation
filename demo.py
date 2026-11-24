@@ -135,6 +135,9 @@ def main() -> int:
     ap.add_argument("--encoder", default="auto", choices=["auto", "onnx", "st", "hash"],
                     help="编码器后端；hash 为无需权重的占位实现，仅用于验证接线（结果无意义）")
     ap.add_argument("--rerank", action="store_true", help="额外演示交叉编码器重排（需 torch）")
+    ap.add_argument("--device", default=None,
+                    help="cpu | cuda，默认取 config 的 latency.device（cpu）；"
+                         "加 --device cuda 可演示 GPU 加速（重排约快 13 倍）")
     ap.add_argument("--score-threads", type=int, default=None,
                     help="算分线程数（默认 cpu_count-2，与 run_e4 一致；延迟仍按单线程口径报）")
     ap.add_argument("--no-reader", action="store_true", help="跳过阅读器")
@@ -191,6 +194,9 @@ def main() -> int:
     import os as _os
     score_threads = int(args.score_threads) if args.score_threads else max(1, (_os.cpu_count() or 3) - 2)
     lat_cfg = cfg.get("latency", {}) or {}
+    # 演示用的推理设备：默认沿用正式口径（config 的 latency.device=cpu）；
+    # 加 --device cuda 可现场对比 GPU 加速（重排/阅读器约快 13 倍，指标不变）
+    dev = str(args.device or lat_cfg.get("device", "cpu"))
 
     print(BAR)
     print(" 检索增强问答 · 单题链路演示")
@@ -327,19 +333,27 @@ def main() -> int:
             lat = cfg.get("latency", {}) or {}
             rcfg = cfg.get("rerank", {}) or {}
             rk = Reranker(model_name=rcfg.get("model", "BAAI/bge-reranker-base"),
-                          depth=depth, topn=topk, device=str(lat_cfg.get("device", "cpu")),
+                          depth=depth, topn=topk, device=dev,
                           max_length=int(rcfg.get("max_length", 512)),
                           threads=int(lat_cfg.get("threads", 1)),
                           score_threads=score_threads).set_doc_map(doc_map)
             t0 = time.perf_counter()
             out = rk.rerank(query["question"], fused[:depth], topn=topk)
             ms = (time.perf_counter() - t0) * 1000
+            if ms > 1000:   # 超过 1 秒说明混进了权重加载（首次调用），预热后重测一次
+                rk.rerank(query["question"], fused[:depth], topn=topk)
+                t0 = time.perf_counter()
+                out = rk.rerank(query["question"], fused[:depth], topn=topk)
+                ms = (time.perf_counter() - t0) * 1000
+                ms_note = "（已预热，不含权重加载）"
+            else:
+                ms_note = ""
             reranked_ids = [d for d, _ in out]
             print(f"  {_w('名次', 6)}{_w('doc_id', 12)}{'重排分':>10}   金标")
             for i, (did, sc) in enumerate(out, 1):
                 print(f"  {_w(i, 6)}{_w(did, 12)}{sc:>10.4f}   {'★' if did == gold else ''}")
             n = max(1, min(depth, len(fused)))
-            print(f"  耗时 {ms:.0f} ms（{score_threads} 线程算分，{ms/n:.0f} ms/候选）")
+            print(f"  耗时 {ms:.0f} ms（{score_threads} 线程算分，{ms/n:.0f} ms/候选）{ms_note}")
             print(f"  注：报告里的延迟口径是 CPU 单线程 ≈225 ms/候选（见 E4），此处为吞吐口径")
         except Exception as exc:
             first = (str(exc).strip().splitlines() or [type(exc).__name__])[0][:70]
@@ -377,8 +391,7 @@ def main() -> int:
             from reader.extractive_qa import ExtractiveReader
             from eval.metrics import em as em_fn, f1 as f1_fn
             rcfg = cfg.get("reader", {}) or {}
-            # 演示固定走 CPU：与第 5 章的延迟口径一致，也避免无 GPU 机器上报 CUDA 错
-            dev = str(lat_cfg.get("device", "cpu"))
+            # 设备由 --device 决定（默认 latency.device=cpu，与第 5 章口径一致）
             reader = ExtractiveReader(
                 model_name=rcfg.get("model", "uer/roberta-base-chinese-extractive-qa"),
                 max_length=int(rcfg.get("max_length", 512)),
@@ -388,7 +401,14 @@ def main() -> int:
             t0 = time.perf_counter()
             pred, score = reader.answer(query["question"], context)
             ms = (time.perf_counter() - t0) * 1000
-            print(f"  预测答案 {pred!r}　score {score:.4f}　{ms:.0f} ms")
+            r_note = ""
+            if ms > 1000:      # 首次含 ~400 MB 权重加载，预热后重测
+                reader.answer(query["question"], context)
+                t0 = time.perf_counter()
+                pred, score = reader.answer(query["question"], context)
+                ms = (time.perf_counter() - t0) * 1000
+                r_note = "（已预热）"
+            print(f"  预测答案 {pred!r}　score {score:.4f}　{ms:.0f} ms{r_note}")
             if gold_answer:
                 print(f"  标准答案 {gold_answer!r}")
                 print(f"  F1 {f1_fn(pred, gold_answer):.4f}　EM {em_fn(pred, gold_answer):.0f}")

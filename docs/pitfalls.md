@@ -56,4 +56,6 @@
 ## 环境认知偏差
 
 - [11-24] [A] **"没有 GPU" 是一次集体误判**。复核演示环境时发现，A 的机器其实就是计划里那块 **RTX 4070 Laptop（8 GB，驱动 610.47）**；但从清华源 `pip install torch` 拿到的是 **CPU 版**（`2.15.0+cpu`，189 MB，`torch.version.cuda=None`），因此 `torch.cuda.is_available()=False`，`config.yaml` 的 `device: cuda` 会**静默退回 cpu**（只打印一行 `[reader] 没有可用的 cuda，自动退回 cpu`）。叠加另两条：B 因 250 MB 轮子反复超时压根没装 torch（见 #11）、C 的机器确实无可用 GPU——三者合起来让全组都以为"我们没有 GPU"。
-  **教训**：`没用上` 与 `没有` 是两件事。报告里必须写"未启用 GPU / 延迟为 CPU 口径"；写成"没有 GPU"等于对硬件条件做了虚假陈述，评审一问就露。要真用上：装 CUDA 版 torch（`--index-url https://download.pytorch.org/whl/cu121`，约 2.5 GB），但**延迟会与 E4 的 CPU 口径不可比**，所以只在演示时用，不进结论。
+  **教训**：`没用上` 与 `没有` 是两件事，报告里必须写"未启用 GPU / 延迟为 CPU 口径"，不能写"没有 GPU"。
+- [11-24] [A] **CUDA 版 torch 怎么装（已实测，含全程踩坑）**：① 官方源 `download.pytorch.org` 在本机只有 **11 KB/s**、`mirrors.aliyun.com` 74 KB/s，均不可用；**上海交大镜像 `mirror.sjtu.edu.cn/pytorch-wheels/` 达 9.4 MB/s**。② `pip install --index-url <SJTU>` 会在 2.42 GB 下载中途 **ReadTimeout**（后端是 `s3.jcloud.sjtu.edu.cn`），必须改用 **`curl -C -` 断点续传**下到本地再 `pip install --no-deps <wheel>`（依赖 filelock/sympy/networkx/jinja2/fsspec 都已装好）。③ **wheel 文件名不能改**：改成 `torch-2.14.1-cu126.whl` 会报 `is not a valid wheel filename`，必须保留 `torch-2.14.1+cu126-cp312-cp312-win_amd64.whl` 全名。④ 版本对照：cu126 最高到 **2.14.1**（cu121 只到 2.5.1、cu128 到 2.11、cu129 到 2.9），装 cu126 对原有 2.15.0 只是小版本回退。
+  实测收益见 E7：重排/阅读器延迟降 **12.8–14.4 倍**，而 top-5 名单与 F1 **一字不变**（`results/tab/E7_gpu_cpu.csv`）。
