@@ -52,3 +52,8 @@
 
 - [11-18] [B]（原「待记：matplotlib 中文字体（D 补）」的实测答案，D 可直接用）matplotlib 在 Windows 上中文变方框：先把 `MPLCONFIGDIR` 指到仓库外（默认缓存在 `C:\Users\<you>\AppData\Local\matplotlib`，沙箱下不可写），再让 `font.sans-serif` 首选 `Microsoft YaHei`（其次 SimHei / SimSun），`axes.unicode_minus=False`；写不出中文就自动退英文标签，不要留方框进报告。
 - [ ] 待记：PPT 里插入的图分辨率要求（E 补）
+
+## 环境认知偏差
+
+- [11-24] [A] **"没有 GPU" 是一次集体误判**。复核演示环境时发现，A 的机器其实就是计划里那块 **RTX 4070 Laptop（8 GB，驱动 610.47）**；但从清华源 `pip install torch` 拿到的是 **CPU 版**（`2.15.0+cpu`，189 MB，`torch.version.cuda=None`），因此 `torch.cuda.is_available()=False`，`config.yaml` 的 `device: cuda` 会**静默退回 cpu**（只打印一行 `[reader] 没有可用的 cuda，自动退回 cpu`）。叠加另两条：B 因 250 MB 轮子反复超时压根没装 torch（见 #11）、C 的机器确实无可用 GPU——三者合起来让全组都以为"我们没有 GPU"。
+  **教训**：`没用上` 与 `没有` 是两件事。报告里必须写"未启用 GPU / 延迟为 CPU 口径"；写成"没有 GPU"等于对硬件条件做了虚假陈述，评审一问就露。要真用上：装 CUDA 版 torch（`--index-url https://download.pytorch.org/whl/cu121`，约 2.5 GB），但**延迟会与 E4 的 CPU 口径不可比**，所以只在演示时用，不进结论。
