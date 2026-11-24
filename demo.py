@@ -132,6 +132,8 @@ def main() -> int:
     ap.add_argument("--alpha", type=float, default=None, help="稠密路权重，默认取 config.yaml")
     ap.add_argument("--max-chars", type=int, default=None, help="上下文上限，默认取 config.yaml")
     ap.add_argument("--model-path", default=None, help="编码器权重（默认自动找 models/ 下的 int8）")
+    ap.add_argument("--encoder", default="auto", choices=["auto", "onnx", "st", "hash"],
+                    help="编码器后端；hash 为无需权重的占位实现，仅用于验证接线（结果无意义）")
     ap.add_argument("--rerank", action="store_true", help="额外演示交叉编码器重排（需 torch）")
     ap.add_argument("--score-threads", type=int, default=None,
                     help="算分线程数（默认 cpu_count-2，与 run_e4 一致；延迟仍按单线程口径报）")
@@ -207,10 +209,20 @@ def main() -> int:
         query_prefix=dense_cfg.get("query_prefix", ""),
         normalize=bool(dense_cfg.get("normalize", True)),
         batch_size=int(dense_cfg.get("encode_batch", 64)),
-        model_path=model_path, backend="auto",
+        model_path=model_path, backend=args.encoder,
     )
+    # 权重缺失时给「人话」提示，而不是抛一屏 traceback（评阅者第一次跑就会遇到）
+    try:
+        _dim = encoder.dim
+    except Exception as exc:
+        first = (str(exc).strip().splitlines() or [type(exc).__name__])[0]
+        print(f"  [X] 找不到稠密编码器权重：{first[:70]}")
+        print("      ① 下载（约 23 MB）：python scripts/download_model.py --parts 1")
+        print("      ② 或先验证流程接线（结果无意义）：python demo.py --encoder hash")
+        print("      ③ 只查数据与索引：python eval/check_data.py --strict")
+        return 2
     avg_len = sum(len(t) for t in doc_texts) // max(1, len(doc_texts))
-    print(f"  语料 {len(docs)} 段（平均 {avg_len} 字）　维度 {encoder.dim} 维"
+    print(f"  语料 {len(docs)} 段（平均 {avg_len} 字）　维度 {_dim} 维"
           f"　相似度 = L2 归一化后的内积（等价余弦）")
 
     t0 = time.perf_counter()

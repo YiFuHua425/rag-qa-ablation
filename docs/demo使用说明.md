@@ -43,7 +43,13 @@ python demo.py --index 3 --rerank                # 指定第 4 题
 python demo.py --list                            # 看有哪些题
 python demo.py --question "苹果公司的创始人是谁"    # 现场自定义提问（无金标）
 python demo.py --score-threads 8 --rerank        # 限线程（默认 cpu_count-2） 
+python demo.py --encoder hash                    # 无权重时只验证接线（结果无意义）
 ```
+
+> 没下权重就直接跑，`demo.py` 会打印下载指引并 `exit 2`，**不会抛 traceback**：
+> ① `python scripts/download_model.py --parts 1`（23 MB）
+> ② 或 `--encoder hash` 走占位后端验证流程
+> ③ 或 `python eval/check_data.py --strict`（零依赖）检查数据
 
 自动选题是**两遍扫描**：先只在「答案 ≤18 字」的题里找（长答案 F1 天生低），找不到才放宽；
 优先级是「一路没召回→融合救回」>「融合比两路都好」>「两路分歧大」。
